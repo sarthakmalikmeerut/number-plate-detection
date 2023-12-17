@@ -1,89 +1,74 @@
-# from ultralytics import YOLO
-# import cv2
-# import cvzone
-#
-# import math
-#
-# vid = cv2.VideoCapture("C:\\Users\\sarth\\PycharmProjects\\OCR\\car_highway.mp4")
-# model = YOLO("yolov8n")
-#
-# while True:
-#     success, img = vid.read()
-#     # succ , im = vid1.read()
-#     results = model(img, stream=True)
-#     # results1 = model(im,stream=True)
-#     for r in results:
-#         boxes = r.boxes
-#         for box in boxes:
-#             x1, y1, x2, y2 = box.xyxy[0]
-#             x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-#
-#             w, h = x2 - x1, y2 - y1
-#             cvzone.cornerRect(img, (x1, y1, w, h))
-#
-#             conf = math.ceil((box.conf[0] * 100)) / 100
-#
-#             cvzone.putTextRect(img, f'{conf}', (max(0, x1), max(35, y1)))
-#         cv2.imshow("image", img)
-#
-#         cv2.waitKey(1)
 import cv2
-from matplotlib import pyplot as plt
-import numpy as np
-import imutils
 import easyocr
-import time
 
+harcascade = "haar.xml"
+output_file_path = "detected_numbers.txt"  # Path to the output file
 
+# Load Haar cascade classifier
+plate_cascade = cv2.CascadeClassifier(harcascade)
 
-img = cv2.imread('Cars52.png')
-gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-# plt.imshow(cv2.cvtColor(gray,cv2.COLOR_BGR2RGB))
-# plt.show()
+# Load EasyOCR reader with adjusted parameters
+reader = easyocr.Reader(['en'], gpu=False)
 
-noise_red = cv2.bilateralFilter(gray,11,17,17)
-edge_detection = cv2.Canny(noise_red,30,200)
-plt.imshow(cv2.cvtColor(edge_detection,cv2.COLOR_BGR2RGB))
+cap = cv2.VideoCapture(1)
 
+# Check if the camera opened successfully
+if not cap.isOpened():
+    print("Error: Could not open camera.")
+    exit()
 
+# Set video frame width and height
+# cap.set(3, 640)  # width
+# cap.set(4, 480)  # height
 
-keypoints = cv2.findContours(edge_detection.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-contours = imutils.grab_contours(keypoints)
-contours = sorted(contours, key=cv2.contourArea, reverse=True)[:10]
-location = None
-for contour in contours:
-    approx = cv2.approxPolyDP(contour, 10, True)
-    if len(approx) == 4:
-        location = approx
+min_area = 500
+
+detected_numbers = []  # List to store detected license plate numbers
+
+while True:
+    success, img = cap.read()
+
+    if not success:
+        print("Error: Could not read frame.")
         break
 
-# print(location)
+    img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
+    plates = plate_cascade.detectMultiScale(img_gray, 1.1, 4)
 
+    for (x, y, w, h) in plates:
+        area = w * h
 
-mask = np.zeros(gray.shape, np.uint8)
-new_image = cv2.drawContours(mask, [location], 0,255, -1)
-new_image = cv2.bitwise_and(img, img, mask=mask)
-plt.imshow(cv2.cvtColor(new_image, cv2.COLOR_BGR2RGB))
+        if area > min_area:
+            cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.putText(img, "Number Plate", (x, y - 5), cv2.FONT_HERSHEY_COMPLEX_SMALL, 1, (255, 0, 255), 2)
 
+            img_roi = img[y: y + h, x:x + w]
 
-(x,y) = np.where(mask==255)
-(x1, y1) = (np.min(x), np.min(y))
-(x2, y2) = (np.max(x), np.max(y))
-cropped_image = gray[x1:x2+1, y1:y2+1]
-plt.imshow(cv2.cvtColor(cropped_image, cv2.COLOR_BGR2RGB))
+            # Perform OCR on the license plate region
+            results = reader.readtext(cv2.cvtColor(img_roi, cv2.COLOR_BGR2RGB), detail=0)
 
+            # Filter OCR results based on string length (assuming longer string means better confidence)
+            filtered_results = [result for result in results if len(result) >= 6]  # Adjust the length as needed
 
+            if filtered_results:
+                detected_text = filtered_results[0]  # Extracting the detected text
+                print("Detected License Plate: ", detected_text)
 
-reader = easyocr.Reader(['en'])
-results = reader.readtext(cropped_image)
-print(results)
-text = ''
-for result in results:
-    text += result[1]+''
+                # Append the detected number to the list
+                detected_numbers.append(detected_text)
+                with open(output_file_path, "w") as file:
+                    for number in detected_numbers:
+                        file.write(number + "\n")
 
+    # Comment the next two lines to avoid displaying the frames
+    cv2.imshow("Result", img)
+    # cv2.imshow("ROI", img_roi)
 
-print(text)
-plt.show()
+    key = cv2.waitKey(1)
 
+# Release the VideoCapture object
+cap.release()
 
+# Close all OpenCV windows
+cv2.destroyAllWindows()
